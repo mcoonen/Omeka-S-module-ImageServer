@@ -484,6 +484,13 @@ class ConfigForm extends Form
             ])
         ;
 
+        // Use Laminas's input filter for URL validation on certain optional fields
+        $inputFilter = $this->getInputFilter();
+        $inputFilter->add([
+            'name' => 'imageserver_info_rights_url',
+            'required' => false,
+            'allow_empty' => true, // Allow empty strings to pass Laminas Uri validation
+        ]);
     }
 
     /**
