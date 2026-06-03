@@ -238,6 +238,7 @@ composer require jcupitt/vips
 ```
 This allows the `data/scripts/iiiftile.php` script to find and use the [php-vips 2.x.x] library, which is faster than 
 the command line tool.
+
 5. Only for PHP 8.3 and higher: Disable stack overflow tests. php-vips executes FFI callbacks off the main thread and 
 this confuses those checks, at least in php 8.3.0. Add this line to `php.ini`:
 ```ini
