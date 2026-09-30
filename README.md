@@ -73,9 +73,11 @@ PHP should be installed with the extension `exif` in order to get the size of
 images. This is the case for all major distributions and providers.
 
 For [performance reasons], the recommended image processor is [vips] (with the
-php extension if possible, or as command line tool), but the more common
-[ImageMagick] (command line `magick` or legacy `convert`), [GD] or [Imagick]
-(php extensions) are supported. Except vips, they are installed by default in
+php extension [php-vips 1.0.x] if possible, or as command line tool). Installation instructions
+are further down in this readme.
+
+The more common [ImageMagick] (command line `magick` or legacy `convert`), [GD] or [Imagick]
+(php extensions) are supported as well. Unlike vips, these are installed by default in
 most servers.
 
 The module [Iiif Server] is optional. Install it alongside Image Server to
@@ -158,23 +160,90 @@ directive `<Directory>`.
 
 To fix Amazon issues with cors, see the [aws documentation].
 
-### Vips
+### Image processor: Vips (command line)
 
-To install [vips], just run on Debian/Ubuntu, without the recommended graphical
-interface:
+In order to use **"Vips (command line)"** as **Image processor** in the module config, we need to install 
+the command line [vips]. Recommended version is 8.10 or higher. Versions prior to 8.4 have not been
+tested.
+
+Installation on Debian/Ubuntu, without the recommended graphical interface:
 
 ```sh
 sudo apt install --no-install-recommends libvips-tools
 ```
 
-or for on Centos/RedHat:
+Installation on CentOS/RedHat:
 
 ```sh
 sudo dnf install vips-tools
 ```
 
-Recommanded version is 8.10 or higher. Versions prior to 8.4 have not been
-tested.
+
+### Image processor: PHP-Vips 1.0.x
+
+In order to use **"php-vips (library, fastest)"** as **Image processor** in the module config, we need to install the php extension [php-vips 1.0.x] 
+
+Installation on Debian/Ubuntu
+1. Install the `libvips-tools` library, just like in the command line scenario
+2. Install the php extension, with pecl:
+```sh
+sudo pecl install vips
+```
+3. Enable the extension in `php.ini` by adding this line:
+```ini
+extension=vips.so
+```
+4. The `jcupitt/vips` 1.0.x package is already provided by this module's composer.json, so we don't need to install it separately.
+
+
+### Fast tile script: PHP-Vips 2.x.x or Vips command line
+
+A lightweight PHP script (`data/scripts/iiiftile.php`) can serve IIIF image
+tiles without loading the full Omeka S stack. It uses [php-vips 2.x.x] (not to be mistaken with `php-vips 1.0.x` that 
+was used as Image processor in the module config) or a fallback to vips command line. Both tools use disk caching for 
+optimal performance:
+
+- Cache hit: ~5ms (vs ~200ms with Omeka S stack)
+- Cache miss: ~200ms (vips processing + cache write)
+- Pre-tiled images: still benefits from bypassing the Omeka S bootstrap
+
+The script checks `is_public` on each media via a lightweight DB query, and
+falls back to the standard Omeka S stack when vips is not available.
+
+Of course, if you use an external server, you don't need to create static or
+dynamic tiles (and in that case you don't need this module anyway).
+
+#### Setup
+1. The module adds these rules in `.htaccess` before the Omeka catch-all:
+
+```apache
+# Fast IIIF tile server (bypass Omeka S stack).
+RewriteCond %{REQUEST_URI} /iiif/([23]/)?[^/]+/[^/]+/[^/]+/[^/]+/[^.]+\.\w+$
+RewriteRule iiif/(.*) modules/ImageServer/data/scripts/iiiftile.php [END,E=IIIF_PATH:/iiif/$1]
+```
+
+Warning: check if you install modules with composer (see [#2432]), replace
+"modules/" by "composer-addons/modules/".
+
+2. Install `libvips-tools` (Ubuntu/Debian) or `vips-tools` (CentOS/RedHat) as described above in the command line scenario.
+3. `ffi` is set to 'preload' by default, but that is not supported by [php-vips 2.x.x]. Permanently enable the extension 
+in `php.ini` by adding this line:
+```ini
+ffi.enable=true
+```
+4. Install the `jcupitt/vips` package to the Omeka `vendor/` directory (not the module's vendor/ directory)
+```sh
+cd /path/to/omeka
+composer require jcupitt/vips
+```
+This allows the `data/scripts/iiiftile.php` script to find and use the [php-vips 2.x.x] library, which is faster than 
+the command line tool.
+5. Only for PHP 8.3 and higher: Disable stack overflow tests. php-vips executes FFI callbacks off the main thread and 
+this confuses those checks, at least in php 8.3.0. Add this line to `php.ini`:
+```ini
+zend.max_allowed_stack_size=-1
+```
+
 
 ### Tile formats
 
@@ -262,32 +331,7 @@ This is independent of IIIF viewers (Universal Viewer, Mirador, Diva) and works
 without them. It provides a simple zoom experience on any item/media page,
 similar to the admin media show page.
 
-### Fast tile script
 
-A lightweight PHP script (`data/scripts/iiiftile.php`) can serve IIIF image
-tiles without loading the full Omeka S stack. It uses vips (php-vips or cli)
-with disk caching for optimal performance:
-
-- Cache hit: ~5ms (vs ~200ms with Omeka S stack)
-- Cache miss: ~200ms (vips processing + cache write)
-- Pre-tiled images: still benefits from bypassing the Omeka S bootstrap
-
-Setup: add these rules in `.htaccess` before the Omeka catch-all:
-
-```apache
-# Fast IIIF tile server (bypass Omeka S stack).
-RewriteCond %{REQUEST_URI} /iiif/([23]/)?[^/]+/[^/]+/[^/]+/[^/]+/[^.]+\.\w+$
-RewriteRule iiif/(.*) modules/ImageServer/data/scripts/iiiftile.php [END,E=IIIF_PATH:/iiif/$1]
-```
-
-Warning: check if you install modules with composer (see [#2432]), replace
-"modules/" by "composer-addons/modules/".
-
-The script checks `is_public` on each media via a lightweight DB query, and
-falls back to the standard Omeka S stack when vips is not available.
-
-Of course, if you use an external server, you don't need to create static or
-dynamic tiles (and in that case you don't need this module anyway).
 
 ### Creation of static tiles
 
@@ -434,7 +478,7 @@ TODO / Bugs
 - [x] Use the tiled images when available for arbitrary size request (ok for vips/tiled tiff).
 - [ ] Update tiling pipeline to use `StoreInterface` instead of `AmazonS3`-specific methods, so any S3-compatible store can be used for tile creation/deletion.
 - [ ] Add a limit (width/height) for dynamic extraction (used with zoning and annotations).
-- [ ] Add a processor for [php-vips] (currently cli-only, add support for the php extension/library).
+- [ ] Add a processor for [php-vips 1.0.x] (currently cli-only, add support for the php extension/library).
 - [x] Use vips as Omeka thumbnailer.
 - [ ] Add auto as default type of tiles and thumbnailer (so choose tiled tiff if vips is installed, and select thumbnailer according to input format, etc.).
 - [ ] For jpeg2000, use library [OpenJpeg] instead of ImageMagick or Vips: a dedicated decoder (`opj_decompress`/`kdu_expand`) getting internal tile directly is better for large jp2 (see [gitlab#7]).
@@ -528,10 +572,11 @@ support the [Deep Zoom Image] tile format.
 [performance reasons]: https://github.com/libvips/libvips/wiki/Speed-and-memory-use
 [Vips]: https://gitlab.com/Daniel-KM/Omeka-S-module-Vips
 [vips]: https://libvips.github.io/libvips
+[php-vips 1.0.x]: https://github.com/libvips/php-vips-ext
+[php-vips 2.x.x]: https://github.com/libvips/php-vips
 [ImageMagick]: https://www.imagemagick.org
 [GD]: https://secure.php.net/manual/en/book.image.php
 [Imagick]: https://php.net/manual/en/book.imagick.php
-[php-vips]: https://github.com/libvips/php-vips
 [ImageServer.zip]: https://gitlab.com/Daniel-KM/Omeka-S-module-ImageServer/-/releases
 [Universal Viewer]: https://gitlab.com/Daniel-KM/Omeka-S-module-UniversalViewer
 [Ark]: https://github.com/BibLibre/omeka-s-module-Ark
